@@ -1,0 +1,131 @@
+import struct
+import binascii
+import hashlib
+
+
+# 64个常数K
+_K = (0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+      0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+      0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+      0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+      0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+      0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+      0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+      0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+      0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+      0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+      0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+      0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+      0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+      0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+      0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+      0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2)
+
+# 初始化缓存
+_H = (0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+      0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19)
+
+
+# 定义sha1_256类
+class sha_256:
+
+    # 输入参数为明文
+    def __init__(self, m=None):
+        # 初始化明文
+        self.buffer = b''
+        # 输入明文长度
+        self.counter = 0
+        self.H = _H
+        self.K = _K
+
+        if m:
+            self.update(m)
+
+    # 定义循环右移方法
+    def rotr(self, x, y):
+        return ((x >> y) | (x << (32 - y))) & 0xFFFFFFFF
+
+    # 定义对单个分组进行操作的方法
+    def operate(self, c):
+        # 定义长度为64的空列表w
+        w = [0] * 64
+        # 将单个分组转换为16个32位的字，并填充w列表的前16位
+        w[0:16] = struct.unpack('!16L', c)
+
+        # 填充w列表的后48位
+        for i in range(16, 64):
+            s0 = self.rotr(w[i - 15], 7) ^ self.rotr(w[i - 15], 18) ^ (w[i - 15] >> 3)
+            s1 = self.rotr(w[i - 2], 17) ^ self.rotr(w[i - 2], 19) ^ (w[i - 2] >> 10)
+            w[i] = (w[i - 16] + s0 + w[i - 7] + s1) & 0xFFFFFFFF
+
+        a, b, c, d, e, f, g, h = self.H
+
+        # 执行64步迭代操作
+        for i in range(64):
+            s0 = self.rotr(a, 2) ^ self.rotr(a, 13) ^ self.rotr(a, 22)
+            maj = (a & b) ^ (a & c) ^ (b & c)
+            t2 = s0 + maj
+            s1 = self.rotr(e, 6) ^ self.rotr(e, 11) ^ self.rotr(e, 25)
+            ch = (e & f) ^ ((~e) & g)
+            t1 = h + s1 + ch + self.K[i] + w[i]
+
+            h = g
+            g = f
+            f = e
+            e = (d + t1) & 0xFFFFFFFF
+            d = c
+            c = b
+            b = a
+            a = (t1 + t2) & 0xFFFFFFFF
+
+        # 更新缓存
+        self.H = [(x + y) & 0xFFFFFFFF for x, y in zip(self.H, [a, b, c, d, e, f, g, h])]
+
+    # 定义更新N个分组缓存的方法
+    def update(self, m):
+        if not m:
+            return
+
+        # 获取明文
+        self.buffer = m
+        # 获取明文长度
+        self.counter = len(m)
+        # 计算明文长度表示的后64位
+        length = struct.pack('!Q', int(self.counter * 8))
+
+        # 对前N-1个分组进行哈希过程
+        while len(self.buffer) >= 64:
+            self._operate(self.buffer[:64])
+            self.buffer = self.buffer[64:]
+
+        # 填充未处理的第N个分组到512位或1024位，并进行哈希过程
+        mdi = self.counter % 64
+        # 如果第N个分组小于56，则填充至512位
+        if mdi < 56:
+            padlen = 55 - mdi
+            self.buffer += (b'\x80' + (b'\x00' * padlen) + length)
+            self.operate(self.buffer)
+        # 否则，填充到1024位
+        else:
+            padlen = 119 - mdi
+            self.buffer += (b'\x80' + (b'\x00' * padlen) + length)
+            for i in range(2):
+                self.operate(self.buffer[i * 64:(i + 1) * 64])
+
+    # 输出明文摘要， 字节串类型
+    def digest(self):
+        return struct.pack('!8L', *self.H)
+
+    # 输出明文搞要， 十六进制字符串类型
+    def hexdigest(self):
+        return binascii.hexlify(self.digest()).decode()
+
+
+if __name__ == "__main__":
+    # print(sha_256(b'hello').digest())
+    # print(hashlib.sha256(b'hello').digest())
+    print('message: hallo')
+    print('the result of SHA256:')
+    print(sha_256(b'hallo').hexdigest())
+    print('the result of SHA256(hashlib):')
+    print(hashlib.sha256(b'hallo').hexdigest())
